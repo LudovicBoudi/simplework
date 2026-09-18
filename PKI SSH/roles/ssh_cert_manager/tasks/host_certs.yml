@@ -1,0 +1,39 @@
+---
+- name: Lire la clé publique d'hôte
+  ansible.builtin.slurp:
+    src: "{{ ssh_host_key_path }}"
+  register: _host_pub
+
+- name: Mettre en staging la clé publique d'hôte
+  ansible.builtin.copy:
+    content: "{{ _host_pub.content | b64decode }}"
+    dest: "{{ ssh_staging_dir }}/hosts/{{ inventory_hostname }}_host_key.pub"
+    mode: "0644"
+  delegate_to: "{{ ssh_signing_host }}"
+  become: "{{ ssh_ca_enabled }}"
+
+- name: Signer le certificat d'hôte
+  ansible.builtin.command: >-
+    ssh-keygen -s {{ ssh_ca_key_path }} -I {{ inventory_hostname }} -h
+    -n {{ inventory_hostname }},{{ inventory_hostname }}.{{ ssh_principal_domain }}
+    -V {{ ssh_effective_host_validity }}
+    {{ ssh_staging_dir }}/hosts/{{ inventory_hostname }}_host_key.pub
+  args:
+    creates: "{{ ssh_staging_dir }}/hosts/{{ inventory_hostname }}_host_key-cert.pub"
+  delegate_to: "{{ ssh_signing_host }}"
+  become: "{{ ssh_ca_enabled }}"
+
+- name: Lire le certificat d'hôte signé
+  ansible.builtin.slurp:
+    src: "{{ ssh_staging_dir }}/hosts/{{ inventory_hostname }}_host_key-cert.pub"
+  delegate_to: "{{ ssh_signing_host }}"
+  register: _host_cert
+
+- name: Déployer le certificat d'hôte
+  ansible.builtin.copy:
+    content: "{{ _host_cert.content | b64decode }}"
+    dest: "{{ ssh_host_key_cert_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload sshd

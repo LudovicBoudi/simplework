@@ -1,0 +1,86 @@
+---
+- name: Générer les paires de clés utilisateurs
+  ansible.builtin.command: >-
+    ssh-keygen -t {{ ssh_user_key_type }}
+    -f {{ ssh_staging_dir }}/users/{{ item.name }}
+    -N '' -C '{{ item.name }}'
+  args:
+    creates: "{{ ssh_staging_dir }}/users/{{ item.name }}"
+  delegate_to: "{{ ssh_signing_host }}"
+  become: "{{ ssh_ca_enabled }}"
+  run_once: true
+  loop: "{{ ssh_users }}"
+
+- name: Signer les certificats utilisateurs
+  ansible.builtin.command: >-
+    ssh-keygen -s {{ ssh_ca_key_path }} -I {{ item.name }}
+    -n {{ item.name }} -V {{ ssh_effective_user_validity }}
+    {{ ssh_staging_dir }}/users/{{ item.name }}.pub
+  args:
+    creates: "{{ ssh_staging_dir }}/users/{{ item.name }}-cert.pub"
+  delegate_to: "{{ ssh_signing_host }}"
+  become: "{{ ssh_ca_enabled }}"
+  run_once: true
+  loop: "{{ ssh_users }}"
+
+- name: Rapatrier les clés privées utilisateurs
+  ansible.builtin.fetch:
+    src: "{{ ssh_staging_dir }}/users/{{ item.name }}"
+    dest: "{{ ssh_local_store }}/users/{{ item.name }}/id_{{ ssh_user_key_type }}"
+    flat: true
+  delegate_to: "{{ ssh_signing_host }}"
+  run_once: true
+  loop: "{{ ssh_users }}"
+
+- name: Rapatrier les clés publiques utilisateurs
+  ansible.builtin.fetch:
+    src: "{{ ssh_staging_dir }}/users/{{ item.name }}.pub"
+    dest: "{{ ssh_local_store }}/users/{{ item.name }}/id_{{ ssh_user_key_type }}.pub"
+    flat: true
+  delegate_to: "{{ ssh_signing_host }}"
+  run_once: true
+  loop: "{{ ssh_users }}"
+
+- name: Rapatrier les certificats utilisateurs
+  ansible.builtin.fetch:
+    src: "{{ ssh_staging_dir }}/users/{{ item.name }}-cert.pub"
+    dest: "{{ ssh_local_store }}/users/{{ item.name }}/id_{{ ssh_user_key_type }}-cert.pub"
+    flat: true
+  delegate_to: "{{ ssh_signing_host }}"
+  run_once: true
+  loop: "{{ ssh_users }}"
+
+- name: Déployer les artefacts utilisateurs sur les postes
+  block:
+    - name: Créer le répertoire .ssh de l'utilisateur
+      ansible.builtin.file:
+        path: "{{ ssh_user_home_prefix }}/{{ item.name }}/.ssh"
+        state: directory
+        owner: "{{ item.name }}"
+        group: "{{ item.name }}"
+        mode: "0700"
+
+    - name: Déployer la clé privée
+      ansible.builtin.copy:
+        src: "{{ ssh_local_store }}/users/{{ item.name }}/id_{{ ssh_user_key_type }}"
+        dest: "{{ ssh_user_home_prefix }}/{{ item.name }}/.ssh/id_{{ ssh_user_key_type }}"
+        owner: "{{ item.name }}"
+        group: "{{ item.name }}"
+        mode: "0600"
+
+    - name: Déployer la clé publique
+      ansible.builtin.copy:
+        src: "{{ ssh_local_store }}/users/{{ item.name }}/id_{{ ssh_user_key_type }}.pub"
+        dest: "{{ ssh_user_home_prefix }}/{{ item.name }}/.ssh/id_{{ ssh_user_key_type }}.pub"
+        owner: "{{ item.name }}"
+        group: "{{ item.name }}"
+        mode: "0644"
+
+    - name: Déployer le certificat
+      ansible.builtin.copy:
+        src: "{{ ssh_local_store }}/users/{{ item.name }}/id_{{ ssh_user_key_type }}-cert.pub"
+        dest: "{{ ssh_user_home_prefix }}/{{ item.name }}/.ssh/id_{{ ssh_user_key_type }}-cert.pub"
+        owner: "{{ item.name }}"
+        group: "{{ item.name }}"
+        mode: "0644"
+  loop: "{{ ssh_users | selectattr('host', 'equalto', inventory_hostname) | list }}"

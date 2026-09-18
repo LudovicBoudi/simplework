@@ -1,0 +1,29 @@
+---
+- name: Déployer la clé publique de la CA
+  ansible.builtin.copy:
+    content: "{{ ssh_ca_pub_key }}"
+    dest: "{{ ssh_ca_pub_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Configurer sshd pour la PKI (serveurs)
+  ansible.builtin.template:
+    src: sshd_pki.conf.j2
+    dest: "{{ ssh_sshd_dropin_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when: groups['ssh_servers'] is defined and inventory_hostname in groups['ssh_servers']
+  notify: Reload sshd
+
+- name: Ajouter la CA comme autorité de certificats hôtes (postes)
+  ansible.builtin.lineinfile:
+    path: "{{ ssh_known_hosts_path }}"
+    line: "@cert-authority *.{{ ssh_principal_domain }} {{ ssh_ca_pub_key }}"
+    regexp: '^@cert-authority \*\.{{ ssh_principal_domain | regex_escape }} '
+    create: true
+    owner: root
+    group: root
+    mode: "0644"
+  when: groups['ssh_workstations'] is defined and inventory_hostname in groups['ssh_workstations']

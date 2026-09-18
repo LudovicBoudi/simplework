@@ -1,0 +1,14 @@
+---
+- name: Inclure la gestion de la CA
+  ansible.builtin.include_tasks: ca.yml
+
+- name: Inclure les certificats d'hôtes
+  ansible.builtin.include_tasks: host_certs.yml
+  when: groups['ssh_servers'] is defined and inventory_hostname in groups['ssh_servers']
+
+- name: Inclure les certificats utilisateurs
+  ansible.builtin.include_tasks: user_certs.yml
+  when: groups['ssh_workstations'] is defined and inventory_hostname in groups['ssh_workstations']
+
+- name: Inclure la distribution de confiance
+  ansible.builtin.include_tasks: trust.yml

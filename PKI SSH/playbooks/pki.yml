@@ -1,0 +1,6 @@
+---
+- name: Déployer la PKI SSH (CA, certificats hôtes et utilisateurs)
+  hosts: all
+  gather_facts: true
+  roles:
+    - ssh_cert_manager

@@ -1,0 +1,44 @@
+---
+ssh_ca_hostname: ""
+
+# Clé de la CA root (production)
+ssh_ca:
+  key_dir: /etc/ssh
+  key_name: ca_ssh_ca
+  key_type: ed25519
+  comment: "SSH PKI Root CA"
+
+# CA temporaire de test, utilisée quand aucune CA n'est définie
+ssh_ca_temporary:
+  key_dir: /tmp/ssh_ca_temp
+  validity: "+24h"
+
+# Validité des certificats émis
+ssh_host_cert_validity: "+52w"
+ssh_user_cert_validity: "+52w"
+
+# Chemins des clés d'hôte sur les serveurs
+ssh_host_key_path: /etc/ssh/ssh_host_ed25519_key.pub
+ssh_host_key_cert_path: /etc/ssh/ssh_host_ed25519_key-cert.pub
+
+# Chemins de distribution
+ssh_ca_pub_path: /etc/ssh/ca_ssh_ca.pub
+ssh_known_hosts_path: /etc/ssh/ssh_known_hosts
+ssh_sshd_dropin_path: /etc/ssh/sshd_config.d/99-ssh-pki.conf
+
+# Service SSH (sshd ou ssh selon la distribution)
+ssh_service_name: sshd
+
+# Domaine utilisé pour les principaux des certificats hôtes
+ssh_principal_domain: example.com
+
+# Clés utilisateurs
+ssh_user_key_type: ed25519
+ssh_user_home_prefix: /home
+
+# Répertoires de staging (sur le nœud de signature et sur le contrôleur)
+ssh_staging_dir: /var/tmp/ssh_pki_staging
+ssh_local_store: /tmp/ssh_pki_local
+
+# Utilisateurs : liste d'objets { name, host }
+ssh_users: []
