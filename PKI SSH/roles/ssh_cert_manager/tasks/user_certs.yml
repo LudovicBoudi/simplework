@@ -14,7 +14,10 @@
 - name: Signer les certificats utilisateurs
   ansible.builtin.command: >-
     ssh-keygen -s {{ ssh_ca_key_path }} -I {{ item.name }}
-    -n {{ item.name }} -V {{ ssh_effective_user_validity }}
+    -n {{ (item.principals | default([item.name])) | join(',') }}
+    {{ '-O source-address=' ~ (item.source_addresses | join(',')) if (item.source_addresses is defined and item.source_addresses | length > 0) else '' }}
+    {{ ssh_user_cert_options | map('regex_replace', '^', '-O ') | join(' ') }}
+    -V {{ ssh_effective_user_validity }}
     {{ ssh_staging_dir }}/users/{{ item.name }}.pub
   args:
     creates: "{{ ssh_staging_dir }}/users/{{ item.name }}-cert.pub"

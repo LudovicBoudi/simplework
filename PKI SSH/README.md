@@ -46,9 +46,35 @@ principaux sont exposés dans `inventory/hosts.yml` (`all.vars`) :
 | Variable | Description |
 | --- | --- |
 | `ssh_ca_hostname` | Nom d'hôte du nœud CA (ex. `ca01`). **Si vide, le rôle génère une CA temporaire de test.** |
-| `ssh_users` | Liste d'utilisateurs `{ name, host }` à certifier. |
+| `ssh_users` | Liste d'utilisateurs `{ name, host, principals, source_addresses }` à certifier. |
 | `ssh_principal_domain` | Domaine ajouté aux principaux des certificats d'hôte. |
 | `ssh_host_cert_validity` / `ssh_user_cert_validity` | Durée de validité des certificats émis. |
+| `ssh_user_cert_options` | Liste d'options de certificat utilisateur passées via `-O` (ex. `no-port-forwarding`, `no-pty`). |
+
+### Certificats utilisateurs : principals et adresses source
+
+Chaque entrée de `ssh_users` accepte deux champs facultatifs :
+
+- `principals` : liste d'identités embarquées dans le certificat (passées via
+  `-n`). Par défaut, seul `name` est utilisé.
+- `source_addresses` : liste de plages réseau restreignant l'usage du
+  certificat (passée via `-O source-address=`).
+
+```yaml
+ssh_users:
+  - name: alice
+    host: workstation01
+    principals: [alice, admin]
+    source_addresses: ["192.168.1.0/24"]
+  - name: bob
+    host: workstation01
+```
+
+Vérification du certificat généré :
+
+```bash
+ssh-keygen -L -f /tmp/ssh_pki_local/users/alice/id_ed25519-cert.pub
+```
 
 ### CA temporaire (tests avant mise en production)
 

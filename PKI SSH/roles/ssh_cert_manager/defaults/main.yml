@@ -36,6 +36,10 @@ ssh_principal_domain: example.com
 ssh_user_key_type: ed25519
 ssh_user_home_prefix: /home
 
+# Options de certificat utilisateur supplémentaires, passées via -O
+# (ex. "no-port-forwarding", "no-pty", "force-command=/bin/true").
+ssh_user_cert_options: []
+
 # Répertoires de staging (sur le nœud de signature et sur le contrôleur)
 ssh_staging_dir: /var/tmp/ssh_pki_staging
 ssh_local_store: /tmp/ssh_pki_local
