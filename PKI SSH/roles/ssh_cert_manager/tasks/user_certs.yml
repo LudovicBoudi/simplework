@@ -1,4 +1,41 @@
 ---
+- name: Résoudre les utilisateurs à traiter sur ce poste
+  ansible.builtin.set_fact:
+    ssh_local_users: >-
+      {{ ssh_users | default([])
+         | selectattr('host', 'defined')
+         | selectattr('host', 'equalto', inventory_hostname)
+         | list }}
+
+- name: Calculer l'empreinte de signature de chaque utilisateur
+  ansible.builtin.set_fact:
+    ssh_user_cert_signatures: >-
+      {{ ssh_user_cert_signatures | default({}) | combine({
+           item.name: ((item.principals | default([item.name])) | join(','))
+           ~ '|' ~ ((item.source_addresses | default([])) | join(','))
+           ~ '|' ~ (ssh_user_cert_options | join(','))
+           ~ '|' ~ ssh_effective_user_validity
+         }) }}
+  loop: "{{ ssh_users | default([]) }}"
+
+- name: Relire les empreintes de signature enregistrées
+  ansible.builtin.slurp:
+    src: "{{ ssh_staging_dir }}/users/{{ item }}.fingerprint"
+  delegate_to: "{{ ssh_signing_host }}"
+  loop: "{{ ssh_user_cert_signatures.keys() | list }}"
+  register: ssh_user_cert_fp_files
+  failed_when: false
+
+- name: Purger les certificats dont la signature ne correspond plus
+  ansible.builtin.file:
+    path: "{{ ssh_staging_dir }}/users/{{ item.item }}-cert.pub"
+    state: absent
+  delegate_to: "{{ ssh_signing_host }}"
+  become: "{{ ssh_ca_enabled }}"
+  loop: "{{ ssh_user_cert_fp_files.results }}"
+  when: (item.content | default('') | b64decode | trim) != ssh_user_cert_signatures[item.item]
+  register: ssh_user_cert_purged
+
 - name: Générer les paires de clés utilisateurs
   ansible.builtin.command: >-
     ssh-keygen -t {{ ssh_user_key_type }}
@@ -9,7 +46,7 @@
   delegate_to: "{{ ssh_signing_host }}"
   become: "{{ ssh_ca_enabled }}"
   run_once: true
-  loop: "{{ ssh_users }}"
+  loop: "{{ ssh_users | default([]) }}"
 
 - name: Signer les certificats utilisateurs
   ansible.builtin.command: >-
@@ -24,7 +61,24 @@
   delegate_to: "{{ ssh_signing_host }}"
   become: "{{ ssh_ca_enabled }}"
   run_once: true
-  loop: "{{ ssh_users }}"
+  loop: "{{ ssh_users | default([]) }}"
+
+- name: Enregistrer l'empreinte de signature
+  ansible.builtin.copy:
+    content: "{{ ssh_user_cert_signatures[item.name] }}\n"
+    dest: "{{ ssh_staging_dir }}/users/{{ item.name }}.fingerprint"
+    mode: "0644"
+  delegate_to: "{{ ssh_signing_host }}"
+  become: "{{ ssh_ca_enabled }}"
+  loop: "{{ ssh_users | default([]) }}"
+
+- name: Supprimer le contenu du magasin local
+  ansible.builtin.file:
+    path: "{{ ssh_local_store }}/users"
+    state: absent
+  delegate_to: localhost
+  run_once: true
+  when: ssh_user_cert_purged.changed | default(false)
 
 - name: Rapatrier les clés privées utilisateurs
   ansible.builtin.fetch:
@@ -33,7 +87,7 @@
     flat: true
   delegate_to: "{{ ssh_signing_host }}"
   run_once: true
-  loop: "{{ ssh_users }}"
+  loop: "{{ ssh_users | default([]) }}"
 
 - name: Rapatrier les clés publiques utilisateurs
   ansible.builtin.fetch:
@@ -42,7 +96,7 @@
     flat: true
   delegate_to: "{{ ssh_signing_host }}"
   run_once: true
-  loop: "{{ ssh_users }}"
+  loop: "{{ ssh_users | default([]) }}"
 
 - name: Rapatrier les certificats utilisateurs
   ansible.builtin.fetch:
@@ -51,39 +105,40 @@
     flat: true
   delegate_to: "{{ ssh_signing_host }}"
   run_once: true
-  loop: "{{ ssh_users }}"
+  loop: "{{ ssh_users | default([]) }}"
 
-- name: Déployer les artefacts utilisateurs sur les postes
-  block:
-    - name: Créer le répertoire .ssh de l'utilisateur
-      ansible.builtin.file:
-        path: "{{ ssh_user_home_prefix }}/{{ item.name }}/.ssh"
-        state: directory
-        owner: "{{ item.name }}"
-        group: "{{ item.name }}"
-        mode: "0700"
+- name: Créer le répertoire .ssh des utilisateurs
+  ansible.builtin.file:
+    path: "{{ ssh_user_home_prefix }}/{{ item.name }}/.ssh"
+    state: directory
+    owner: "{{ item.name }}"
+    group: "{{ item.name }}"
+    mode: "0700"
+  loop: "{{ ssh_local_users }}"
 
-    - name: Déployer la clé privée
-      ansible.builtin.copy:
-        src: "{{ ssh_local_store }}/users/{{ item.name }}/id_{{ ssh_user_key_type }}"
-        dest: "{{ ssh_user_home_prefix }}/{{ item.name }}/.ssh/id_{{ ssh_user_key_type }}"
-        owner: "{{ item.name }}"
-        group: "{{ item.name }}"
-        mode: "0600"
+- name: Déployer les clés privées
+  ansible.builtin.copy:
+    src: "{{ ssh_local_store }}/users/{{ item.name }}/id_{{ ssh_user_key_type }}"
+    dest: "{{ ssh_user_home_prefix }}/{{ item.name }}/.ssh/id_{{ ssh_user_key_type }}"
+    owner: "{{ item.name }}"
+    group: "{{ item.name }}"
+    mode: "0600"
+  loop: "{{ ssh_local_users }}"
 
-    - name: Déployer la clé publique
-      ansible.builtin.copy:
-        src: "{{ ssh_local_store }}/users/{{ item.name }}/id_{{ ssh_user_key_type }}.pub"
-        dest: "{{ ssh_user_home_prefix }}/{{ item.name }}/.ssh/id_{{ ssh_user_key_type }}.pub"
-        owner: "{{ item.name }}"
-        group: "{{ item.name }}"
-        mode: "0644"
+- name: Déployer les clés publiques
+  ansible.builtin.copy:
+    src: "{{ ssh_local_store }}/users/{{ item.name }}/id_{{ ssh_user_key_type }}.pub"
+    dest: "{{ ssh_user_home_prefix }}/{{ item.name }}/.ssh/id_{{ ssh_user_key_type }}.pub"
+    owner: "{{ item.name }}"
+    group: "{{ item.name }}"
+    mode: "0644"
+  loop: "{{ ssh_local_users }}"
 
-    - name: Déployer le certificat
-      ansible.builtin.copy:
-        src: "{{ ssh_local_store }}/users/{{ item.name }}/id_{{ ssh_user_key_type }}-cert.pub"
-        dest: "{{ ssh_user_home_prefix }}/{{ item.name }}/.ssh/id_{{ ssh_user_key_type }}-cert.pub"
-        owner: "{{ item.name }}"
-        group: "{{ item.name }}"
-        mode: "0644"
-  loop: "{{ ssh_users | selectattr('host', 'equalto', inventory_hostname) | list }}"
+- name: Déployer les certificats
+  ansible.builtin.copy:
+    src: "{{ ssh_local_store }}/users/{{ item.name }}/id_{{ ssh_user_key_type }}-cert.pub"
+    dest: "{{ ssh_user_home_prefix }}/{{ item.name }}/.ssh/id_{{ ssh_user_key_type }}-cert.pub"
+    owner: "{{ item.name }}"
+    group: "{{ item.name }}"
+    mode: "0644"
+  loop: "{{ ssh_local_users }}"

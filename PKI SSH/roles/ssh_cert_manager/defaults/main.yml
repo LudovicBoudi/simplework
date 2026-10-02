@@ -44,5 +44,11 @@ ssh_user_cert_options: []
 ssh_staging_dir: /var/tmp/ssh_pki_staging
 ssh_local_store: /tmp/ssh_pki_local
 
-# Utilisateurs : liste d'objets { name, host }
+# Utilisateurs : liste d'objets { name, host, ca?, principals?, source_addresses? }
 ssh_users: []
+
+# CA multiples
+ssh_cas: []
+ssh_ca_default_name: default
+ssh_servers: []
+ssh_workstations: []

@@ -40,35 +40,50 @@ chaque hôte en fonction de son groupe.
 ## Configuration
 
 Les valeurs par défaut sont dans
-`roles/ssh_cert_manager/defaults/main.yml`. Les points de configuration
-principaux sont exposés dans `inventory/hosts.yml` (`all.vars`) :
+`roles/ssh_cert_manager/defaults/main.yml`.
+
+### CA unique (rétro-compatible)
 
 | Variable | Description |
 | --- | --- |
-| `ssh_ca_hostname` | Nom d'hôte du nœud CA (ex. `ca01`). **Si vide, le rôle génère une CA temporaire de test.** |
-| `ssh_users` | Liste d'utilisateurs `{ name, host, principals, source_addresses }` à certifier. |
+| `ssh_ca_hostname` | Nom d'hôte du nœud CA (ex. `ca01`). Si vide, le rôle génère une CA temporaire. |
+| `ssh_users` | Liste d'utilisateurs `{ name, host, ca?, principals?, source_addresses? }`. |
 | `ssh_principal_domain` | Domaine ajouté aux principaux des certificats d'hôte. |
-| `ssh_host_cert_validity` / `ssh_user_cert_validity` | Durée de validité des certificats émis. |
-| `ssh_user_cert_options` | Liste d'options de certificat utilisateur passées via `-O` (ex. `no-port-forwarding`, `no-pty`). |
+| `ssh_host_cert_validity` / `ssh_user_cert_validity` | Durée de validité. |
+| `ssh_user_cert_options` | Options `-O` supplémentaires pour certificats utilisateurs. |
 
-### Certificats utilisateurs : principals et adresses source
+### CA multiples (multi-clients)
 
-Chaque entrée de `ssh_users` accepte deux champs facultatifs :
+Pour héberger plusieurs CA root, définir `ssh_cas` :
 
-- `principals` : liste d'identités embarquées dans le certificat (passées via
-  `-n`). Par défaut, seul `name` est utilisé.
-- `source_addresses` : liste de plages réseau restreignant l'usage du
-  certificat (passée via `-O source-address=`).
+```yaml
+ssh_cas:
+  - name: client_a
+    hostname: ca-client-a
+    key_dir: /etc/ssh
+    key_name: ca_client_a
+    key_type: ed25519
+    host_validity: "+52w"
+    user_validity: "+52w"
+  - name: client_b
+    hostname: ca-client-b
+    key_dir: /etc/ssh
+    key_name: ca_client_b
+    key_type: ed25519
+```
+
+Chaque utilisateur/hôte peut spécifier quelle CA utiliser via le champ `ca` (par défaut `default`) :
 
 ```yaml
 ssh_users:
   - name: alice
     host: workstation01
+    ca: client_a
     principals: [alice, admin]
     source_addresses: ["192.168.1.0/24"]
-  - name: bob
-    host: workstation01
 ```
+
+Si `ssh_cas` n'est pas défini, le rôle dérive automatiquement une configuration mono-CA depuis les variables historiques (`ssh_ca_hostname`, `ssh_ca`, etc.). La CA par défaut est nommée `default`.
 
 Vérification du certificat généré :
 

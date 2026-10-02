@@ -1,0 +1,11 @@
+- name: Créer les répertoires de staging sur le nœud de signature
+  ansible.builtin.file:
+    path: "{{ ssh_staging_dir }}/{{ item }}"
+    state: directory
+    mode: "0755"
+  delegate_to: "{{ ssh_ca_default.hostname if ssh_ca_default.hostname | length > 0 else 'localhost' }}"
+  become: "{{ ssh_ca_default.hostname | length > 0 }}"
+  run_once: true
+  loop:
+    - hosts
+    - users

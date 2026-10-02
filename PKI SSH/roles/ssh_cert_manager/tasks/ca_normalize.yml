@@ -1,0 +1,69 @@
+---
+- name: Normaliser la configuration des CA
+  ansible.builtin.set_fact:
+    ssh_cas_normalized: >-
+      {% if ssh_cas is defined and ssh_cas | length > 0 %}
+      {{ ssh_cas }}
+      {% else %}
+      {% set _ca = {
+        'name': ssh_ca_default_name | default('default'),
+        'hostname': ssh_ca_hostname | default(''),
+        'key_dir': ssh_ca.key_dir | default('/etc/ssh'),
+        'key_name': ssh_ca.key_name | default('ca_ssh_ca'),
+        'key_type': ssh_ca.key_type | default('ed25519'),
+        'comment': ssh_ca.comment | default('SSH PKI Root CA'),
+        'host_validity': ssh_host_cert_validity | default('+52w'),
+        'user_validity': ssh_user_cert_validity | default('+52w')
+      } %}
+      {% if not _ca.hostname %}
+      {{ [ (_ca | combine({
+          'hostname': 'localhost',
+          'key_dir': ssh_ca_temporary.key_dir | default('/tmp/ssh_ca_temp'),
+          'comment': (_ca.comment ~ ' (TEMPORARY)'),
+          'host_validity': ssh_ca_temporary.validity | default('+24h'),
+          'user_validity': ssh_ca_temporary.validity | default('+24h'),
+          'temporary': true
+        })) ] }}
+      {% else %}
+      {{ [_ca] }}
+      {% endif %}
+      {% endif %}
+
+- name: Construire la liste de travail des CA
+  ansible.builtin.set_fact:
+    ssh_cas_worklist: >-
+      {{ ssh_cas_normalized | map('dict2items') | map('items2dict') | list }}
+  vars:
+    _dummy: null
+
+- name: Enrichir la liste de travail des CA
+  ansible.builtin.set_fact:
+    ssh_cas_worklist: >-
+      {{ ssh_cas_worklist | map('combine', {
+          'hostname': (item.hostname if (item.hostname | default('')) | length > 0 else 'localhost'),
+          'become': ((item.hostname | default('')) | length > 0),
+          'key_path': ((item.key_dir ~ '/' ~ (item.key_name | default('ca_ssh_ca'))) if ((item.hostname | default('')) | length > 0) else ((item.key_dir | default('/tmp/ssh_ca_temp')) ~ '/' ~ (item.key_name | default('ca_ssh_ca')))),
+          'key_comment': ((item.comment | default('SSH PKI Root CA')) ~ (' (TEMPORARY)' if (item.temporary | default(false)) else ''))
+        }) | list }}
+  loop: "{{ ssh_cas_normalized }}"
+
+- name: Indexer les CA par nom
+  ansible.builtin.set_fact:
+    ssh_cas_index: >-
+      {{ dict(ssh_cas_worklist | map(attribute='name') | zip(ssh_cas_worklist)) }}
+
+- name: Déterminer la CA par défaut
+  ansible.builtin.set_fact:
+    ssh_ca_default: "{{ ssh_cas_index[ssh_ca_default_name | default('default')] }}"
+
+- name: Créer les répertoires de staging sur le nœud de signature
+  ansible.builtin.file:
+    path: "{{ ssh_staging_dir }}/{{ item }}"
+    state: directory
+    mode: "0755"
+  delegate_to: "{{ ssh_ca_default.hostname if ssh_ca_default is defined and ssh_ca_default.hostname | length > 0 else 'localhost' }}"
+  become: "{{ ssh_ca_default is defined and ssh_ca_default.hostname | length > 0 }}"
+  run_once: true
+  loop:
+    - hosts
+    - users

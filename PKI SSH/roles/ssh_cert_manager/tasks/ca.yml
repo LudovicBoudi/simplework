@@ -1,49 +1,30 @@
 ---
-- name: Résoudre la configuration de la CA
-  ansible.builtin.set_fact:
-    ssh_ca_enabled: "{{ ssh_ca_hostname | length > 0 }}"
-    ssh_signing_host: "{{ ssh_ca_hostname if (ssh_ca_hostname | length > 0) else 'localhost' }}"
-    ssh_ca_key_path: "{{ (ssh_ca.key_dir ~ '/' ~ ssh_ca.key_name) if (ssh_ca_hostname | length > 0) else (ssh_ca_temporary.key_dir ~ '/' ~ ssh_ca.key_name) }}"
-    ssh_effective_host_validity: "{{ ssh_ca_temporary.validity if not (ssh_ca_hostname | length > 0) else ssh_host_cert_validity }}"
-    ssh_effective_user_validity: "{{ ssh_ca_temporary.validity if not (ssh_ca_hostname | length > 0) else ssh_user_cert_validity }}"
-
-- name: Créer le répertoire de la clé CA
-  ansible.builtin.file:
-    path: "{{ ssh_ca_key_path | dirname }}"
-    state: directory
-    mode: "0700"
-  delegate_to: "{{ ssh_signing_host }}"
-  become: "{{ ssh_ca_enabled }}"
-  run_once: true
-
-- name: Créer les répertoires de staging
-  ansible.builtin.file:
-    path: "{{ ssh_staging_dir }}/{{ item }}"
-    state: directory
-    mode: "0755"
-  delegate_to: "{{ ssh_signing_host }}"
-  become: "{{ ssh_ca_enabled }}"
-  run_once: true
-  loop:
-    - hosts
-    - users
-
-- name: Générer la paire de clés de la CA
+- name: Générer les paires de clés des CA
   ansible.builtin.command: >-
-    ssh-keygen -t {{ ssh_ca.key_type }} -f {{ ssh_ca_key_path }}
-    -N '' -C '{{ ssh_ca.comment }}'
+    ssh-keygen -t {{ item.key_type | default('ed25519') }} -f {{ item.key_path }}
+    -N '' -C '{{ item.key_comment }}'
   args:
-    creates: "{{ ssh_ca_key_path }}"
-  delegate_to: "{{ ssh_signing_host }}"
-  become: "{{ ssh_ca_enabled }}"
+    creates: "{{ item.key_path }}"
+  delegate_to: "{{ item.hostname }}"
+  become: "{{ item.become }}"
   run_once: true
+  loop: "{{ ssh_cas_worklist | default([]) }}"
 
-- name: Lire la clé publique de la CA
+- name: Lire les clés publiques des CA
   ansible.builtin.slurp:
-    src: "{{ ssh_ca_key_path }}.pub"
-  delegate_to: "{{ ssh_signing_host }}"
-  register: _ca_pub
+    src: "{{ item.key_path }}.pub"
+  delegate_to: "{{ item.hostname }}"
+  register: _ca_pub_slurps
+  run_once: true
+  loop: "{{ ssh_cas_worklist | default([]) }}"
 
-- name: Exposer la clé publique de la CA en fact
+- name: Indexer les clés publiques des CA
   ansible.builtin.set_fact:
-    ssh_ca_pub_key: "{{ _ca_pub.content | b64decode }}"
+    ssh_cas_pub_index: >-
+      {{ dict(_ca_pub_slurps.results | map(attribute='item') | map(attribute='name')
+         | zip(_ca_pub_slurps.results | map(attribute='content') | map('b64decode') | map('trim'))) }}
+
+- name: Exposer la clé publique de la CA par défaut
+  ansible.builtin.set_fact:
+    ssh_ca_pub_key: >-
+      {{ ssh_cas_pub_index[ssh_ca_default.name] if ssh_cas_pub_index is defined and ssh_ca_default is defined and ssh_ca_default.name in ssh_cas_pub_index else '' }}
